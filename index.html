@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <meta charset="UTF-8" />
+  <title>Word Search Generator</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
+    #controls {
+      margin-bottom: 20px;
+    }
+    #grid {
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    #grid td {
+      width: 30px;
+      height: 30px;
+      text-align: center;
+      border: 1px solid #333;
+      font-weight: bold;
+      font-size: 18px;
+    }
+    #word-list {
+      margin-top: 20px;
+    }
+    #answer-grid td.answer-cell {
+      background-color: rgba(255, 215, 0, 0.5); /* light gold highlight */
+    }
+  </style>
+</head>
+<body>
+  <h1>Word Search Generator</h1>
+
+  <div id="controls">
+    <label>
+      Words (one per line):
+      <br />
+      <textarea id="words-input" rows="6" cols="30">
+random
+configure
+document
+keyboard
+hydrate
+	  </textarea>
+    </label>
+    <br /><br />
+    <label>
+      Rows:
+      <input id="rows-input" type="number" value="15" min="5" max="30" />
+    </label>
+    <label>
+      Cols:
+      <input id="cols-input" type="number" value="15" min="5" max="30" />
+    </label>
+    <br /><br />
+    <fieldset>
+      <legend>Allowed directions</legend>
+      <label><input type="checkbox" class="dir-checkbox" value="RIGHT" checked /> Right</label>
+      <label><input type="checkbox" class="dir-checkbox" value="LEFT" checked /> Left</label>
+      <label><input type="checkbox" class="dir-checkbox" value="DOWN" checked /> Down</label>
+      <label><input type="checkbox" class="dir-checkbox" value="UP" checked /> Up</label>
+      <label><input type="checkbox" class="dir-checkbox" value="DOWN_RIGHT" checked /> Down-Right</label>
+      <label><input type="checkbox" class="dir-checkbox" value="DOWN_LEFT" checked /> Down-Left</label>
+      <label><input type="checkbox" class="dir-checkbox" value="UP_RIGHT" checked /> Up-Right</label>
+      <label><input type="checkbox" class="dir-checkbox" value="UP_LEFT" checked /> Up-Left</label>
+    </fieldset>
+    <br />
+    <button id="generate-btn">Generate Puzzle</button>
+  </div>
+
+  <h2>Puzzle</h2>
+  <button id="download-puzzle-pdf">Download Puzzle PDF</button>
+  <table id="grid"></table>
+
+  <h2>Words</h2>
+  <ul id="word-list"></ul>
+
+  <h2>Answer Sheet (highlighted)</h2>
+  <button id="download-answer-pdf">Download Answer PDF</button>
+  <table id="answer-grid"></table>
+
+  <script>
+    const DIRECTIONS = {
+      RIGHT:  { dx: 1,  dy: 0 },
+      LEFT:   { dx: -1, dy: 0 },
+      DOWN:   { dx: 0,  dy: 1 },
+      UP:     { dx: 0,  dy: -1 },
+      DOWN_RIGHT: { dx: 1,  dy: 1 },
+      DOWN_LEFT:  { dx: -1, dy: 1 },
+      UP_RIGHT:   { dx: 1,  dy: -1 },
+      UP_LEFT:    { dx: -1, dy: -1 }
+    };
+	
+	let lastResult = null;
+
+    function createEmptyGrid(rows, cols) {
+      const grid = [];
+      for (let y = 0; y < rows; y++) {
+        grid.push(new Array(cols).fill(null));
+      }
+      return grid;
+    }
+
+    function canPlaceWord(grid, word, startX, startY, direction) {
+      const rows = grid.length;
+      const cols = grid[0].length;
+      const { dx, dy } = direction;
+
+      for (let i = 0; i < word.length; i++) {
+        const x = startX + dx * i;
+        const y = startY + dy * i;
+        if (x < 0 || x >= cols || y < 0 || y >= rows) return false;
+        const cell = grid[y][x];
+        if (cell !== null && cell !== word[i]) return false;
+      }
+      return true;
+    }
+
+    function placeWord(grid, word, startX, startY, direction) {
+      const { dx, dy } = direction;
+      for (let i = 0; i < word.length; i++) {
+        const x = startX + dx * i;
+        const y = startY + dy * i;
+        grid[y][x] = word[i];
+      }
+    }
+
+    function fillEmptyCellsWithRandomLetters(grid) {
+      const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      const rows = grid.length;
+      const cols = grid[0].length;
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          if (grid[y][x] === null) {
+            const idx = Math.floor(Math.random() * alphabet.length);
+            grid[y][x] = alphabet[idx];
+          }
+        }
+      }
+    }
+
+    function generateWordSearch(options) {
+      const {
+        words,
+        rows,
+        cols,
+        allowedDirections = ["RIGHT", "DOWN"],
+        maxRetriesPerWord = 200
+      } = options;
+
+      const cleanWords = words
+        .map(w => w.trim().toUpperCase())
+        .filter(w => w.length > 0);
+
+      const grid = createEmptyGrid(rows, cols);
+      const directionList = allowedDirections
+        .map(key => DIRECTIONS[key])
+        .filter(Boolean);
+
+      const placements = [];
+
+      for (const word of cleanWords) {
+        let placed = false;
+
+        for (let attempt = 0; attempt < maxRetriesPerWord && !placed; attempt++) {
+          const dir = directionList[Math.floor(Math.random() * directionList.length)];
+          const startX = Math.floor(Math.random() * cols);
+          const startY = Math.floor(Math.random() * rows);
+
+          if (canPlaceWord(grid, word, startX, startY, dir)) {
+            placeWord(grid, word, startX, startY, dir);
+            placements.push({ word, startX, startY, dx: dir.dx, dy: dir.dy });
+            placed = true;
+          }
+        }
+
+        if (!placed) {
+          console.warn("Could not place word:", word);
+        }
+      }
+
+      fillEmptyCellsWithRandomLetters(grid);
+
+      return { grid, placements, words: cleanWords };
+    }
+
+    // === Rendering functions ===
+
+    function renderGrid(tableElement, grid, highlightPlacements = []) {
+      tableElement.innerHTML = ""; // clear old content
+      const rows = grid.length;
+      const cols = grid[0].length;
+
+      // Build a set of coordinates to highlight (for the answer grid)
+      const highlightSet = new Set();
+      highlightPlacements.forEach((p, index) => {
+        const { word, startX, startY, dx, dy } = p;
+        for (let i = 0; i < word.length; i++) {
+          const x = startX + dx * i;
+          const y = startY + dy * i;
+          highlightSet.add(`${x},${y}`);
+        }
+      });
+
+      for (let y = 0; y < rows; y++) {
+        const tr = document.createElement("tr");
+        for (let x = 0; x < cols; x++) {
+          const td = document.createElement("td");
+          td.textContent = grid[y][x];
+          if (highlightSet.has(`${x},${y}`)) {
+            td.classList.add("answer-cell");
+          }
+          tr.appendChild(td);
+        }
+        tableElement.appendChild(tr);
+      }
+    }
+
+    function renderWordList(listElement, words) {
+      listElement.innerHTML = "";
+      words.forEach(word => {
+        const li = document.createElement("li");
+        li.textContent = word;
+        listElement.appendChild(li);
+      });
+    }
+
+    // When Generate is clicked, do generation logic
+    document.getElementById("generate-btn").addEventListener("click", () => {
+      const wordsText = document.getElementById("words-input").value;
+      const words = wordsText.split("\n");
+
+      const rows = parseInt(document.getElementById("rows-input").value, 10);
+      const cols = parseInt(document.getElementById("cols-input").value, 10);
+
+      const dirCheckboxes = document.querySelectorAll(".dir-checkbox");
+      const allowedDirections = [];
+      dirCheckboxes.forEach(cb => {
+        if (cb.checked) allowedDirections.push(cb.value);
+      });
+
+      if (allowedDirections.length === 0) {
+        alert("Please select at least one direction.");
+        return;
+      }
+
+      const result = generateWordSearch({
+        words,
+        rows,
+        cols,
+        allowedDirections
+      });
+
+      const gridTable = document.getElementById("grid");
+      const answerTable = document.getElementById("answer-grid");
+      const wordListEl = document.getElementById("word-list");
+
+      renderGrid(gridTable, result.grid);                 // puzzle
+      renderGrid(answerTable, result.grid, result.placements); // answer sheet
+      renderWordList(wordListEl, result.words);
+	  
+	  lastResult = result;
+    });
+	
+	// PDF generation functions
+	function generatePuzzlePDF(grid, words) {
+	  const { jsPDF } = window.jspdf;
+	  const doc = new jsPDF();
+	  
+	  // Title
+	  doc.setFontSize(20);
+	  doc.text("Word Search Puzzle", 105, 20, { align: 'center' });
+	  
+	  // Word list
+	  doc.setFontSize(12);
+	  let yPos = 40;
+	  doc.text("Find these words:", 20, yPos);
+	  yPos += 10;
+	  
+	  words.forEach(word => {
+		doc.text(`• ${word}`, 20, yPos);
+		yPos += 8;
+		if (yPos > 270) {
+		  doc.addPage();
+		  yPos = 20;
+		}
+	  });
+	  
+	  // Grid
+	  const rows = grid.length;
+	  const cols = grid[0].length;
+	  const cellSize = 6;
+	  const startX = 20;
+	  const startY = Math.max(yPos + 10, 80);
+	  
+	  // Draw grid lines
+	  doc.setLineWidth(0.5);
+	  for (let i = 0; i <= rows; i++) {
+		doc.line(startX, startY + i * cellSize, startX + cols * cellSize, startY + i * cellSize);
+	  }
+	  for (let i = 0; i <= cols; i++) {
+		doc.line(startX + i * cellSize, startY, startX + i * cellSize, startY + rows * cellSize);
+	  }
+	  
+	  // Fill letters
+	  doc.setFontSize(10);
+	  for (let y = 0; y < rows; y++) {
+		for (let x = 0; x < cols; x++) {
+		  const letter = grid[y][x];
+		  const xPos = startX + x * cellSize + cellSize / 3;
+		  const yPosLetter = startY + y * cellSize + cellSize / 1.5;
+		  doc.text(letter, xPos, yPosLetter);
+		}
+	  }
+	  
+	  return doc;
+	}
+
+	function generateAnswerPDF(grid, words, placements) {
+	  const { jsPDF } = window.jspdf;
+	  const doc = new jsPDF();
+	  
+	  // Title
+	  doc.setFontSize(20);
+	  doc.text("Word Search - Answer Key", 105, 20, { align: 'center' });
+	  
+	  // Word list (same as puzzle)
+	  doc.setFontSize(12);
+	  let yPos = 40;
+	  doc.text("Words found:", 20, yPos);
+	  yPos += 10;
+	  
+	  words.forEach(word => {
+		doc.text(`• ${word}`, 20, yPos);
+		yPos += 8;
+	  });
+	  
+	  // Highlighted grid
+	  const rows = grid.length;
+	  const cols = grid[0].length;
+	  const cellSize = 6;
+	  const startX = 20;
+	  const startY = Math.max(yPos + 20, 90);
+	  
+	  // Grid background (light gray)
+	  doc.setFillColor(240, 240, 240);
+	  
+	  // Draw cells and highlight word cells
+		for (let y = 0; y < rows; y++) {
+		  for (let x = 0; x < cols; x++) {
+			const isWordCell = placements.some(p => {
+			  for (let i = 0; i < p.word.length; i++) {
+				const px = p.startX + p.dx * i;
+				const py = p.startY + p.dy * i;
+				if (px === x && py === y) return true;
+			  }
+			  return false;
+			});
+			
+			if (isWordCell) {
+			  doc.setFillColor(255, 215, 0);
+			} else {
+			  doc.setFillColor(255, 255, 255);
+			}
+			
+			doc.rect(startX + x * cellSize, startY + y * cellSize, cellSize, cellSize, 'F');
+		  }
+		}
+	  
+	  // Grid borders
+	  doc.setLineWidth(0.5);
+	  doc.setDrawColor(0, 0, 0);
+	  for (let i = 0; i <= rows; i++) {
+		doc.line(startX, startY + i * cellSize, startX + cols * cellSize, startY + i * cellSize);
+	  }
+	  for (let i = 0; i <= cols; i++) {
+		doc.line(startX + i * cellSize, startY, startX + i * cellSize, startY + rows * cellSize);
+	  }
+	  
+	  // Letters
+	  doc.setFontSize(10);
+	  doc.setTextColor(0, 0, 0);
+	  for (let y = 0; y < rows; y++) {
+		for (let x = 0; x < cols; x++) {
+		  const letter = grid[y][x];
+		  const xPos = startX + x * cellSize + cellSize / 3;
+		  const yPosLetter = startY + y * cellSize + cellSize / 1.5;
+		  doc.text(letter, xPos, yPosLetter)
+		}
+	  }
+	  
+	  return doc;
+	}
+	
+	document.getElementById("download-puzzle-pdf").addEventListener("click", () => {
+	  if (!lastResult) {
+		alert("Generate a puzzle first!");
+		return;
+	  }
+	  const doc = generatePuzzlePDF(lastResult.grid, lastResult.words);
+	  doc.save("wordsearch-puzzle.pdf");
+	});
+
+	document.getElementById("download-answer-pdf").addEventListener("click", () => {
+	  if (!lastResult) {
+		alert("Generate a puzzle first!");
+		return;
+	  }
+	  const doc = generateAnswerPDF(lastResult.grid, lastResult.words, lastResult.placements);
+	  doc.save("wordsearch-answer.pdf");
+	});
+  </script>
+</body>
+</html>
